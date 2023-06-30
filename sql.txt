@@ -1,0 +1,367 @@
+Doctor (id_doctor, firstname, lastname,salary)
+Payment (id_payment, date_pay,amount_pay,method_pay,id_app)
+Patient (id_patient, firstname,lastname,dob,address)
+Appointment (id_app, duration_app,date_app,id_doctor,reason_app,id_patient)
+
+
+------------------------------------------PL/SQL---------------------------------------------------
+
+
+--TRIGGER 1   
+    create or replace trigger doc_app
+    before delete
+        on Doctor
+    for each row
+    declare
+        cursor a1 is
+        select * from Appointment;
+    begin
+        for appointment in a1 loop
+            if appointment.id_doctor = :OLD.id_doctor and appointment.date_app > sysdate
+                then RAISE_APPLICATION_ERROR(-20000,'Cannot remove, doc has appointments scheduled');
+            end if;
+        end loop;
+    end;
+/
+INSERT INTO Appointment (id_app, duration_app,date_app,id_doctor,reason_app,id_patient) VALUES (5, 1, to_date('8-Mar-2023','DD-MON-YYYY'), 1, 'headache', 4);
+delete from Doctor where id_doctor = 1;
+
+--TRIGGER 2
+create or replace trigger app_for_doc_same_day
+    before insert
+        on Appointment
+    for each row
+    declare
+        x number;
+        currentDate date;
+        cursor a1 is
+            select * from Doctor;
+    begin
+        currentDate := :new.date_app;
+        select count(id_app) into x
+            from appointment
+                where date_app = currentDate;
+        for doc in a1 loop
+            if :new.id_doctor = doc.id_doctor and x > 0
+            then DBMS_OUTPUT.PUT_LINE(doc.firstname || ' ' || doc.lastname || ' has ' || x || ' appointments scheduled the same day.');
+            end if;
+            end loop;
+    end;
+/
+INSERT INTO Appointment (id_app, duration_app,date_app,id_doctor,reason_app,id_patient) VALUES (6, 1, to_date('8-Mar-2023','DD-MON-YYYY'), 1, 'headache',4);
+--TRIGGER 3
+create or replace trigger show_payment_pnames
+    after insert 
+        on payment
+    for each row
+
+    declare
+    fname varchar(40);
+    sname varchar (40);
+        cursor a1 is
+            select * from  appointment;
+    begin
+        for app in a1 loop
+            if :NEW.id_app = app.id_app
+            then
+            
+            select firstname into fname
+            from patient
+            where id_patient= app.id_patient;
+            
+            select lastname into sname
+            from patient
+            where id_patient= app.id_patient;
+            DBMS_OUTPUT.PUT_LINE('Here is the patient name and surname: ' || fname ||' '|| sname);
+                end if;
+            end loop;
+    end;
+/
+INSERT INTO Payment (id_payment, date_pay,amount_pay,method_pay,id_app) VALUES (9, to_date('20-Jan-1983','DD-MON-YYYY'), 200, 'card',1);
+
+
+--PROCEDURE 1
+CREATE OR REPLACE PROCEDURE RisePrice
+AS
+nocard EXCEPTION;
+CURSOR curs IS
+SELECT id_payment
+FROM payment
+WHERE method_pay = 'card' ;
+x NUMBER;
+y NUMBER;
+BEGIN
+SELECT COUNT(id_payment) INTO x
+FROM payment
+WHERE method_pay = 'card' ;
+IF x = 0 THEN RAISE nocard;
+ELSE
+OPEN curs;
+LOOP
+FETCH curs into y;
+EXIT WHEN curs%notfound;
+UPDATE payment
+SET amount_pay = amount_pay*1.2
+WHERE id_payment = y and method_pay = 'card';
+END LOOP;
+dbms_output.put_line('Prices are raised by 20% for card ');
+END IF;
+EXCEPTION WHEN nocard THEN
+dbms_output.put_line('There are no payment method on card.');
+END;
+
+select * from payment;
+exec riseprice;
+
+--PROCEDURE 2
+CREATE OR REPLACE PROCEDURE patient_appointments(p_name varchar)
+AS
+    x number;
+    NoAppointmentForPatient Exception;
+    cursor A1 is
+        select reason_app from Appointment a, patient p 
+        where a.id_patient= p.id_patient and p.firstname = p_name;
+begin
+    select count(id_app) into x
+        from Appointment a, patient p
+            where a.id_patient= p.id_patient and p.firstname = p_name;
+    if x = 0
+        then raise NoAppointmentForPatient;
+    else
+        DBMS_OUTPUT.PUT_LINE('There are ' || x || ' appointments');
+        for reason in A1 loop
+        DBMS_OUTPUT.PUT_LINE('Reason: ' || reason.reason_app);
+        end loop;
+    end if;
+    exception
+    when NoAppointmentForPatient
+    then DBMS_OUTPUT.PUT_LINE('There are no appointments for that patient');
+end;
+
+exec patient_appointments('AHMET');
+
+--PROCEDURE 3
+create or replace procedure appointment_schedule(xday date)
+as
+    x number;
+    NoAppointmentScheduled exception;
+    cursor A1 is
+        select reason_app from Appointment where date_app = xday;
+begin
+    select count(Appointment.id_app) into x
+        from Appointment
+            where date_app = xday;
+    if x = 0
+        then raise NoAppointmentScheduled;
+    else
+        DBMS_OUTPUT.PUT_LINE('There are ' || x || ' appointments scheduled');
+        for reason in A1 loop
+        DBMS_OUTPUT.PUT_LINE('Reason: ' || reason.reason_app);
+        end loop;
+    end if;
+    exception
+    when NoAppointmentScheduled
+    then DBMS_OUTPUT.PUT_LINE('There are no appointments for chosen day');
+end;
+exec appointment_schedule('18-Mar-1983');
+
+
+
+--------------------------------------------T-SQL-------------------------------------
+
+
+
+--PROCEDURE 1 (RETURN)
+CREATE PROCEDURE RiseSalary @x int ,@y int
+AS 
+DECLARE curs CURSOR FOR 
+SELECT id_doctor,salary
+FROM doctor 
+WHERE salary< @x or salary> @y;
+DECLARE @docno int;
+DECLARE @sal int;
+Declare @ret int;
+BEGIN
+OPEN curs;
+FETCH NEXT FROM curs INTO @docno ,@sal;
+WHILE @@FETCH_STATUS =0
+BEGIN
+IF @sal< @x SET @sal =@sal *1.1;
+ELSE SET @sal =@sal *0.9;
+UPDATE doctor SET  salary =@sal WHERE id_doctor =@docno;
+PRINT 'SALARY CHANGED FOR DOCTOR' + cast(@docno as varchar)+ cast(getdate()as varchar);
+FETCH NEXT FROM curs INTO @docno , @sal;
+END;
+CLOSE curs;
+Select @ret = salary from Doctor where id_doctor = @docno;
+return @ret;
+END;
+
+Declare @returnsal int;
+Execute @returnsal = RiseSalary 3000,4000;
+print @returnsal;
+
+select * from doctor
+drop procedure RiseSalary
+
+
+--PROCEDURE 2 (result set)
+create procedure appointment_schedule(@xday datetime)
+as
+begin
+    declare @x int;
+    declare @r varchar(100);
+    declare @idap int;
+    declare A1 cursor local for
+        select id_app from Appointment where date_app = @xday;
+
+    select @x = count(Appointment.id_app)
+        from Appointment
+            where date_app = @xday;
+        PRINT 'There are ' + CAST(@x as varchar) + ' appointments scheduled';
+        open a1;
+        FETCH NEXT FROM a1 into @idap;
+	    WHILE @@FETCH_STATUS <> 0 BREAK ;
+        select @r = reason_app from Appointment
+        where id_app = @idap;
+        PRINT 'Reason: ' + isnull(@r, '');
+end;
+
+SELECT * FROM appointment
+DROP PROCEDURE appointment_schedule
+execute appointment_schedule '9-Mar-1983';
+
+
+--PROCEDURE 3 (OUTPUT)
+
+CREATE PROCEDURE AddAppointmentWithDoc
+@idPerson int, @a_reason varchar(10),
+@message varchar(100) OUTPUT
+As
+Begin
+DECLARE doc CURSOR LOCAL FOR
+Select id_doctor
+From Doctor
+Where salary  <3000;
+
+Declare @countP INT;
+Declare @idNewApp INT;
+Declare @idD INT;
+
+Open doc;
+While 1=1 begin
+Fetch doc into @idD;
+If @@FETCH_STATUS <> 0 BREAK;
+IF @a_reason = 'covid' 
+Select @idNewApp = (MAX(id_app)+1)
+From Appointment;
+INSERT INTO Appointment VALUES(@idNewApp,1,GETDATE(),@idD,@a_reason,@idPerson);
+End;
+close doc;
+Select @message = 'Patient with id ' + CAST(@idPerson as varchar) + ' added new appointment. Reason: ' + @a_reason;
+END; 
+
+select * from Patient;
+select * from Doctor;
+select * from Appointment;
+
+Declare @out varchar(100);
+Execute AddAppointmentWithDoc 4,'covid',@out OUTPUT;
+Print @out;
+select * from doctor;
+select * from Appointment
+drop procedure AddAppointmentWithDoc
+---------------------------------------------------------------------------------TRIGGER----------------------------------------------------------------------------------
+--works trigger 1
+create trigger app_for_doc_same_day on Appointment for insert 
+as
+declare @x INT;
+declare @currentDate date;
+select @currentDate = date_app from inserted;
+declare @new_docid INT;
+select @new_docid = id_doctor from inserted;
+
+declare a1 cursor local for
+select id_doctor from Doctor;
+
+select @x = COUNT(id_app) from Appointment
+where date_app = @currentDate;
+
+declare @temp INT;
+
+begin
+open a1;
+while 1=1 begin
+fetch a1 into @temp;
+If @@FETCH_STATUS <> 0 BREAK ;
+if @new_docid = @temp and @x > 0
+THROW 51000,'Doctor has already appointments scheduled for same day', 1;  
+End;
+close a1;
+END;
+
+select * from Appointment;
+INSERT INTO Appointment (id_app, duration_app,date_app,id_doctor,reason_app,id_patient) VALUES (10, 1, '8-Mar-2023', 1, 'headache',4);
+
+INSERT INTO Appointment (id_app, duration_app,date_app,id_doctor,reason_app,id_patient)
+VALUES (8, 2, '18-Mar-1983', 1, 'headache', 1);
+close a1;
+END;
+
+--TRIGGER2
+CREATE TRIGGER show_patient_names on Patient for insert as
+Declare @pcount int;
+Declare @dobb date;
+Declare @pid int;
+Declare @new_name varchar(40);
+Select @new_name =p.firstname from patient p ,inserted;
+
+Declare a1 CURSOR LOCAL FOR
+Select id_patient 
+from  patient p 
+where p.firstname=@new_name;
+
+begin
+select @pcount =count(p.id_patient) from patient p 
+where p.firstname=@new_name ;
+print 'there are ' + cast(@pcount as varchar) + 'patients with name';
+if @pcount > 0
+open a1;
+while 1=1 begin
+fetch next from a1 into @pid;
+If @@FETCH_STATUS <> 0 BREAK;
+	Select @dobb = dob from Patient where id_patient = @pid;
+	PRINT 'patientID: ' + cast(@pid as varchar) + ' name:' + cast(@new_name as varchar) + ' Date of Birth:' + cast(@dobb as varchar);
+End;
+Close a1;
+END;
+
+select * from patient
+drop trigger show_patient_names;
+INSERT INTO Patient (id_patient, firstname,lastname,dob,address) VALUES (30, 'AHMET', 'ASD', '29-Mar-1965', 'ISTANBUL');
+INSERT INTO Patient (id_patient, firstname,lastname,dob,address) VALUES (23, 'AHMET', 'ASasdaD', '29-Mar-1765', 'ISTANBUL');
+
+
+
+-- triggers 3
+CREATE TRIGGER doc_app on Doctor for delete as
+Declare @old_id int;
+Select @old_id = id_doctor from deleted;
+Declare @old_date date;
+Declare a1 CURSOR LOCAL FOR
+select id_app from Appointment;
+Declare @temp int;
+begin
+open a1;
+while 1=1 begin
+fetch a1 into @temp;
+If @@FETCH_STATUS <> 0 BREAK;
+Select @old_date from Appointment where id_doctor = @temp;
+IF @temp = @old_id AND @old_date > GETDATE()
+	raiserror ('Cannot remove, doc has appointments scheduled', 1,2);
+End;
+close a1;
+END;
+
+INSERT INTO Appointment (id_app, duration_app,date_app,id_doctor,reason_app,id_patient) VALUES (5, 1, to_date('8-Mar-2023','DD-MON-YYYY'), 1, 'headache', 4);
+delete from Doctor where id_doctor = 1;
